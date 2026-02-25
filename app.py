@@ -8,8 +8,18 @@ from slack_sdk.errors import SlackApiError
 from flask import Flask, request
 
 SAVE_FLAG_REGEX = re.compile(r"--save(d)?\b", re.IGNORECASE)
+AREA51_TRIGGER_REGEX = re.compile(r"(^|\s)@?area51(\s|$)", re.IGNORECASE)
 CANVAS_ID_REGEX = re.compile(r"^F[A-Z0-9]{8,}$")
+SLACK_USER_ID_REGEX = re.compile(r"^[UW][A-Z0-9]+$")
 WELCOME_TEXT = "Bhai apnader jonne kaz korte chole ashlam"
+AREA51_MEMBER_IDS = [
+    "Rumman",
+    "Joy Adhikary",
+    "Ishmoth Ura Nuri",
+    "Intishar Ishmam",
+]
+AREA51_MESSAGE_TEXT = "\n Anik bhai sobaire meeting e dakse, Sobai ashen !! :rocket: \n Eta apnader meeting link:https://meet.google.com/eea-ubxh-qfi . \n Join koren, Ami ektu chill kori :sunglasses: "
+AREA51_USER_ID_CACHE = {}
 
 logging.basicConfig(
     level=logging.INFO,
@@ -95,6 +105,84 @@ def _get_bot_member_ids(client, logger):
     return "", ""
 
 
+def _build_mentions(user_ids):
+    return " ".join(f"<@{user_id}>" for user_id in user_ids if user_id)
+
+
+def _normalize_user_key(value):
+    return (value or "").strip().lower()
+
+
+def _build_workspace_user_index(client, logger):
+    user_index = {}
+    cursor = None
+    try:
+        while True:
+            response = client.users_list(limit=200, cursor=cursor)
+            members = response.get("members", [])
+            for member in members:
+                if member.get("deleted") or member.get("is_bot") or member.get("is_app_user"):
+                    continue
+
+                user_id = member.get("id", "")
+                profile = member.get("profile", {})
+                keys = [
+                    user_id,
+                    member.get("name", ""),
+                    profile.get("display_name", ""),
+                    profile.get("display_name_normalized", ""),
+                    profile.get("real_name", ""),
+                    profile.get("real_name_normalized", ""),
+                ]
+
+                for key in keys:
+                    normalized = _normalize_user_key(key)
+                    if normalized and normalized not in user_index:
+                        user_index[normalized] = user_id
+
+            cursor = response.get("response_metadata", {}).get("next_cursor")
+            if not cursor:
+                break
+    except SlackApiError as e:
+        logger.warning("Failed to fetch users list for mentions: %s", e.response.get("error"))
+        return {}
+
+    return user_index
+
+
+def _resolve_area51_member_ids(client, logger):
+    unresolved_keys = []
+    resolved_user_ids = []
+
+    for member_ref in AREA51_MEMBER_IDS:
+        normalized_ref = _normalize_user_key(member_ref)
+        if not normalized_ref:
+            continue
+
+        if SLACK_USER_ID_REGEX.match(member_ref):
+            resolved_user_ids.append(member_ref)
+            continue
+
+        cached_user_id = AREA51_USER_ID_CACHE.get(normalized_ref)
+        if cached_user_id:
+            resolved_user_ids.append(cached_user_id)
+        else:
+            unresolved_keys.append(normalized_ref)
+
+    if unresolved_keys:
+        user_index = _build_workspace_user_index(client, logger)
+        for unresolved_key in unresolved_keys:
+            resolved_user_id = user_index.get(unresolved_key)
+            if resolved_user_id:
+                AREA51_USER_ID_CACHE[unresolved_key] = resolved_user_id
+                resolved_user_ids.append(resolved_user_id)
+            else:
+                logger.warning("Could not resolve AREA51 member: %s", unresolved_key)
+
+    # preserve order while removing duplicates
+    return list(dict.fromkeys(resolved_user_ids))
+
+
 def _post_welcome_with_retry(client, channel_id, logger):
     retryable_errors = {
         "not_in_channel",
@@ -162,20 +250,19 @@ def _welcome_if_bot_join_event(event, client, logger):
     return _post_welcome_with_retry(client, channel_id, logger)
 
 
+def _is_join_system_message(event):
+    subtype = event.get("subtype", "")
+    if subtype not in {"channel_join", "group_join"}:
+        return False
+
+    text = (event.get("text") or "").lower()
+    return "has joined" in text or "has rejoined" in text
+
+
 @bolt_app.event("member_joined_channel")
 def handle_member_joined_channel_events(body, client, logger):
     event = body.get("event", {})
     _welcome_if_bot_join_event(event, client, logger)
-
-
-@bolt_app.event("channel_joined")
-def handle_channel_joined_events(body, client, logger):
-    event = body.get("event", {})
-    channel_id = event.get("channel", {}).get("id")
-    if not channel_id:
-        return
-
-    _post_welcome_with_retry(client, channel_id, logger)
 
 
 @bolt_app.event("message")
@@ -186,12 +273,25 @@ def handle_message_events(body, client, logger):
     user_id = event.get("user")
     subtype = event.get("subtype", "")
 
-    if subtype in {"channel_join", "group_join"}:
+    if _is_join_system_message(event):
         if _welcome_if_bot_join_event(event, client, logger):
             return
 
     # ignore bot-generated messages to avoid loops
     if subtype == "bot_message":
+        return
+
+    if channel_id and AREA51_TRIGGER_REGEX.search(text):
+        try:
+            member_ids = _resolve_area51_member_ids(client, logger)
+            if not member_ids:
+                logger.warning("No valid AREA51 members found for mention.")
+                return
+            mentions = _build_mentions(member_ids)
+            message = f"{mentions} {AREA51_MESSAGE_TEXT}".strip()
+            client.chat_postMessage(channel=channel_id, text=message)
+        except SlackApiError as e:
+            logger.warning("Failed to send @area51 meeting alert: %s", e.response.get("error"))
         return
 
     if not channel_id or not SAVE_FLAG_REGEX.search(text):
