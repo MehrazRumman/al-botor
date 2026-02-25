@@ -158,9 +158,10 @@ def handle_message_events(body, client, logger):
             name="white_check_mark",
             timestamp=event["ts"],
         )
+        mention = f"<@{user_id}> " if user_id else ""
         client.chat_postMessage(
             channel=channel_id,
-            text="Bhai apnar message canvas-e save hoye gese! :white_check_mark:",
+            text=f"{mention} Bhai apnar message canvas-e save hoye gese! :white_check_mark:",
         )
     except SlackApiError as e:
         logger.warning("Saved to canvas but failed to react/confirm: %s", e.response.get("error"))
