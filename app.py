@@ -1,5 +1,7 @@
 import os
 import re
+import time
+import logging
 from slack_bolt import App
 from slack_bolt.adapter.flask import SlackRequestHandler
 from slack_sdk.errors import SlackApiError
@@ -9,9 +11,17 @@ SAVE_FLAG_REGEX = re.compile(r"--save(d)?\b", re.IGNORECASE)
 CANVAS_ID_REGEX = re.compile(r"^F[A-Z0-9]{8,}$")
 WELCOME_TEXT = "Bhai apnader jonne kaz korte chole ashlam"
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
 bolt_app = App(
     token=os.environ["SLACK_BOT_TOKEN"],
     signing_secret=os.environ["SLACK_SIGNING_SECRET"],
+    # Required so the bot can process its own channel_join system message
+    # and send the welcome text on join/rejoin.
+    ignoring_self_events_enabled=False,
 )
 
 
@@ -76,35 +86,96 @@ def _get_user_display_name(client, user_id, logger):
         return f"<@{user_id}>"
 
 
-def _get_bot_user_id(client, logger):
+def _get_bot_member_ids(client, logger):
     try:
         auth = client.auth_test()
-        return auth.get("user_id", "")
+        return auth.get("user_id", ""), auth.get("bot_id", "")
     except SlackApiError as e:
-        logger.warning("Could not resolve bot user ID: %s", e.response.get("error"))
-    return ""
+        logger.warning("Could not resolve bot identity: %s", e.response.get("error"))
+    return "", ""
+
+
+def _post_welcome_with_retry(client, channel_id, logger):
+    retryable_errors = {
+        "not_in_channel",
+        "channel_not_found",
+        "internal_error",
+        "request_timeout",
+        "ratelimited",
+    }
+    max_attempts = 4
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            client.chat_postMessage(
+                channel=channel_id,
+                text=WELCOME_TEXT,
+            )
+            # print(f"[welcome] posted in channel={channel_id} attempt={attempt}", flush=True)
+            return True
+        except SlackApiError as e:
+            error = e.response.get("error", "unknown_error")
+            logger.warning(
+                "Welcome post failed: channel=%s attempt=%s error=%s",
+                channel_id,
+                attempt,
+                error,
+            )
+            # print(
+            #     f"[welcome] failed channel={channel_id} attempt={attempt} error={error}",
+            #     flush=True,
+            # )
+            if error not in retryable_errors or attempt == max_attempts:
+                return False
+
+            retry_after = None
+            headers = getattr(e.response, "headers", {}) or {}
+            if isinstance(headers, dict):
+                retry_after = headers.get("Retry-After")
+            sleep_seconds = float(retry_after) if retry_after else float(attempt)
+            time.sleep(sleep_seconds)
+
+    return False
+
+
+def _welcome_if_bot_join_event(event, client, logger):
+    channel_id = event.get("channel")
+    joined_member_id = event.get("user") or event.get("bot_id")
+    bot_user_id, bot_id = _get_bot_member_ids(client, logger)
+    # logger.info(
+    #     "Join event check: channel=%s joined_member_id=%s bot_user_id=%s bot_id=%s type=%s subtype=%s",
+    #     channel_id,
+    #     joined_member_id,
+    #     bot_user_id,
+    #     bot_id,
+    #     event.get("type"),
+    #     event.get("subtype"),
+    # )
+
+    if not channel_id or not joined_member_id:
+        return False
+
+    bot_member_ids = {member_id for member_id in (bot_user_id, bot_id) if member_id}
+    if not bot_member_ids or joined_member_id not in bot_member_ids:
+        return False
+
+    return _post_welcome_with_retry(client, channel_id, logger)
 
 
 @bolt_app.event("member_joined_channel")
 def handle_member_joined_channel_events(body, client, logger):
     event = body.get("event", {})
-    channel_id = event.get("channel")
-    joined_user_id = event.get("user")
-    bot_user_id = _get_bot_user_id(client, logger)
+    _welcome_if_bot_join_event(event, client, logger)
 
-    if not channel_id or not joined_user_id or not bot_user_id:
+
+@bolt_app.event("channel_joined")
+def handle_channel_joined_events(body, client, logger):
+    event = body.get("event", {})
+    channel_id = event.get("channel", {}).get("id")
+    if not channel_id:
         return
 
-    if joined_user_id != bot_user_id:
-        return
-
-    try:
-        client.chat_postMessage(
-            channel=channel_id,
-            text=WELCOME_TEXT,
-        )
-    except SlackApiError as e:
-        logger.warning("Failed to post welcome message: %s", e.response.get("error"))
+    _post_welcome_with_retry(client, channel_id, logger)
 
 
 @bolt_app.event("message")
@@ -113,9 +184,14 @@ def handle_message_events(body, client, logger):
     text = event.get("text", "")
     channel_id = event.get("channel")
     user_id = event.get("user")
+    subtype = event.get("subtype", "")
 
-    # ignore bot messages to avoid loops
-    if event.get("subtype") == "bot_message":
+    if subtype in {"channel_join", "group_join"}:
+        if _welcome_if_bot_join_event(event, client, logger):
+            return
+
+    # ignore bot-generated messages to avoid loops
+    if subtype == "bot_message":
         return
 
     if not channel_id or not SAVE_FLAG_REGEX.search(text):
@@ -172,6 +248,20 @@ handler = SlackRequestHandler(bolt_app)
 
 @flask_app.route("/slack/events", methods=["POST"])
 def slack_events():
+    # payload = request.get_json(silent=True) or {}
+    # event = payload.get("event", {})
+    # print(
+    #     "[slack-event] type=%s event_type=%s subtype=%s channel=%s user=%s bot_id=%s"
+    #     % (
+    #         payload.get("type"),
+    #         event.get("type"),
+    #         event.get("subtype"),
+    #         event.get("channel"),
+    #         event.get("user"),
+    #         event.get("bot_id"),
+    #     ),
+    #     flush=True,
+    # )
     return handler.handle(request)
 
 if __name__ == "__main__":
