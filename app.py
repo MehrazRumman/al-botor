@@ -9,7 +9,7 @@ from flask import Flask, request
 
 SAVE_FLAG_REGEX = re.compile(r"--save(d)?\b", re.IGNORECASE)
 AREA51_TRIGGER_REGEX = re.compile(r"(^|\s)@?area51(\s|$)", re.IGNORECASE)
-SIGN_OUT_REGEX = re.compile(r"\bsigning?\s*-?\s*out\b", re.IGNORECASE)
+SIGN_OUT_REGEX = re.compile(r"\bsign(?:ing)?\s*-?\s*out\b", re.IGNORECASE)
 CANVAS_ID_REGEX = re.compile(r"^F[A-Z0-9]{8,}$")
 SLACK_USER_ID_REGEX = re.compile(r"^[UW][A-Z0-9]+$")
 WELCOME_TEXT = "Bhai apnader jonne kaz korte chole ashlam"
