@@ -346,6 +346,10 @@ def handle_message_events(body, client, logger):
 flask_app = Flask(__name__)
 handler = SlackRequestHandler(bolt_app)
 
+@flask_app.get("/")
+def health():
+    return "ok", 200
+
 @flask_app.route("/slack/events", methods=["POST"])
 def slack_events():
     # payload = request.get_json(silent=True) or {}
