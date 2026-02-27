@@ -284,7 +284,7 @@ def handle_message_events(body, client, logger):
 
     if channel_id and SIGN_OUT_REGEX.search(text):
         mention = f"<@{user_id}>" if user_id else ""
-        honorific = "apu" if user_id == "D07AVS5KAPK" else "bhai"
+        honorific = "apu" if user_id == "Ishmoth Ura Nuri" else "bhai"
         greeting_target = f"{mention} {honorific}".strip()
         try:
             client.chat_postMessage(
