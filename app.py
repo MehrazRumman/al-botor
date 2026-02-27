@@ -283,11 +283,13 @@ def handle_message_events(body, client, logger):
         return
 
     if channel_id and SIGN_OUT_REGEX.search(text):
-        mention = f"<@{user_id}> " if user_id else ""
+        mention = f"<@{user_id}>" if user_id else ""
+        honorific = "apu" if user_id == "D07AVS5KAPK" else "bhai"
+        greeting_target = f"{mention} {honorific}".strip()
         try:
             client.chat_postMessage(
                 channel=channel_id,
-                text=f'{mention}bhai ajke onk kosto korsen, Eibar rest koren :wave: :zzz:',
+                text=f"{greeting_target} ajke onk kosto korsen, Eibar rest koren :wave: :zzz:",
             )
         except SlackApiError as e:
             logger.warning("Failed to send sign-out response: %s", e.response.get("error"))
