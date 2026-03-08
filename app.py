@@ -23,11 +23,7 @@ AREA51_MEMBER_IDS = [
 ]
 AREA51_MESSAGE_TEXT = "\n Anik bhai sobaire meeting e dakse, Sobai ashen !! :rocket: \n Eta apnader meeting link:https://meet.google.com/eea-ubxh-qfi . \n Join koren, Ami ektu chill kori :sunglasses: "
 AREA51_USER_ID_CACHE = {}
-BIRTHDAY_CHANNEL = os.environ.get("BIRTHDAY_CHANNEL", "C01K3CU80NL")
-BIRTHDAY_TANVIR_REF = os.environ.get("BIRTHDAY_TANVIR_REF", "Tanvir Hashem Bhuiyan")
-BIRTHDAY_RUMMAN_REF = os.environ.get("BIRTHDAY_RUMMAN_REF", "Rumman")
-BIRTHDAY_POST_AT_LOCAL = os.environ.get("BIRTHDAY_POST_AT_LOCAL", "2026-03-08 13:00")
-BIRTHDAY_TIMEZONE = os.environ.get("BIRTHDAY_TIMEZONE", "Asia/Dhaka")
+
 BIRTHDAY_AUTOSCHEDULE_ENABLED = (
     os.environ.get("BIRTHDAY_AUTOSCHEDULE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 )
