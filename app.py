@@ -2,8 +2,6 @@ import os
 import re
 import time
 import logging
-from datetime import datetime
-from zoneinfo import ZoneInfo
 from slack_bolt import App
 from slack_bolt.adapter.flask import SlackRequestHandler
 from slack_sdk.errors import SlackApiError
@@ -23,11 +21,6 @@ AREA51_MEMBER_IDS = [
 ]
 AREA51_MESSAGE_TEXT = "\n Anik bhai sobaire meeting e dakse, Sobai ashen !! :rocket: \n Eta apnader meeting link:https://meet.google.com/eea-ubxh-qfi . \n Join koren, Ami ektu chill kori :sunglasses: "
 AREA51_USER_ID_CACHE = {}
-
-BIRTHDAY_AUTOSCHEDULE_ENABLED = (
-    os.environ.get("BIRTHDAY_AUTOSCHEDULE_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
-)
-BIRTHDAY_POST_WINDOW_SECONDS = 90
 
 logging.basicConfig(
     level=logging.INFO,
@@ -121,28 +114,6 @@ def _normalize_user_key(value):
     return (value or "").strip().lower()
 
 
-def _resolve_user_id(client, user_ref, logger):
-    if not user_ref:
-        return ""
-
-    if SLACK_USER_ID_REGEX.match(user_ref):
-        return user_ref
-
-    normalized_ref = _normalize_user_key(user_ref)
-    cached_user_id = AREA51_USER_ID_CACHE.get(normalized_ref)
-    if cached_user_id:
-        return cached_user_id
-
-    user_index = _build_workspace_user_index(client, logger)
-    resolved_user_id = user_index.get(normalized_ref, "")
-    if resolved_user_id:
-        AREA51_USER_ID_CACHE[normalized_ref] = resolved_user_id
-        return resolved_user_id
-
-    logger.warning("Could not resolve user reference: %s", user_ref)
-    return ""
-
-
 def _build_workspace_user_index(client, logger):
     user_index = {}
     cursor = None
@@ -211,120 +182,6 @@ def _resolve_area51_member_ids(client, logger):
 
     # preserve order while removing duplicates
     return list(dict.fromkeys(resolved_user_ids))
-
-
-def _build_birthday_message(tanvir_user_id, rumman_user_id):
-    tanvir_mention = f"<@{tanvir_user_id}>"
-    rumman_mention = f"<@{rumman_user_id}>"
-    return (
-        f"🎉 শুভ জন্মদিন, {tanvir_mention}! 🎉\n\n"
-        "আজকের দিনটা বিশেষ খুব,\n"
-        f"{tanvir_mention} এর জন্মদিনের রূপ।\n"
-        "হাসি আনন্দে কাটুক সময়,\n"
-        "সাফল্যে ভরে উঠুক প্রতিটা ক্ষয়।\n\n"
-        "স্বপ্নগুলো হোক সত্যি একদিন,\n"
-        "ভালোবাসায় ভরে উঠুক প্রতিদিন।\n"
-        "দোয়া করি সুখে থাকুন সারাটা বছর,\n"
-        "আনন্দে কাটুক জীবন আপনার ভরপুর।\n\n"
-        f"আমার পক্ষ থেকে এবং আমার Boss {rumman_mention} এর পক্ষ থেকে আপনাকে জানাই আন্তরিক শুভ জন্মদিন। 🎂\n\n"
-        "দেরি হওয়ার জন্য দুঃখিত। আসলে আমি আমার বসের মতোই একটু lazy 😅\n"
-        "কালকে তো ঘুমিয়েই ছিলাম!"
-    )
-
-
-def _parse_birthday_post_at_epoch(logger):
-    try:
-        timezone = ZoneInfo(BIRTHDAY_TIMEZONE)
-    except Exception:
-        logger.error("Invalid BIRTHDAY_TIMEZONE: %s", BIRTHDAY_TIMEZONE)
-        return None
-
-    try:
-        local_dt = datetime.strptime(BIRTHDAY_POST_AT_LOCAL, "%Y-%m-%d %H:%M")
-    except ValueError:
-        logger.error(
-            "Invalid BIRTHDAY_POST_AT_LOCAL: %s. Expected format: YYYY-MM-DD HH:MM",
-            BIRTHDAY_POST_AT_LOCAL,
-        )
-        return None
-
-    return int(local_dt.replace(tzinfo=timezone).timestamp())
-
-
-def _is_message_already_scheduled(client, channel_id, post_at, text):
-    cursor = None
-    while True:
-        response = client.chat_scheduledMessages_list(
-            channel=channel_id,
-            oldest=max(post_at - BIRTHDAY_POST_WINDOW_SECONDS, 0),
-            latest=post_at + BIRTHDAY_POST_WINDOW_SECONDS,
-            limit=200,
-            cursor=cursor,
-        )
-
-        for scheduled_message in response.get("scheduled_messages", []):
-            same_post_time = int(scheduled_message.get("post_at", 0)) == post_at
-            same_text = (scheduled_message.get("text", "") or "").strip() == text.strip()
-            if same_post_time and same_text:
-                return True
-
-        cursor = response.get("response_metadata", {}).get("next_cursor")
-        if not cursor:
-            return False
-
-
-def _schedule_birthday_message(client, logger):
-    if not BIRTHDAY_AUTOSCHEDULE_ENABLED:
-        logger.info("Birthday scheduling disabled by BIRTHDAY_AUTOSCHEDULE_ENABLED.")
-        return
-
-    post_at = _parse_birthday_post_at_epoch(logger)
-    if not post_at:
-        return
-
-    now = int(time.time())
-    if post_at <= now:
-        logger.info(
-            "Birthday schedule target already passed. post_at=%s now=%s",
-            post_at,
-            now,
-        )
-        return
-
-    tanvir_user_id = _resolve_user_id(client, BIRTHDAY_TANVIR_REF, logger)
-    rumman_user_id = _resolve_user_id(client, BIRTHDAY_RUMMAN_REF, logger)
-    if not tanvir_user_id or not rumman_user_id:
-        logger.error(
-            "Birthday scheduling skipped due to unresolved users. tanvir_ref=%s rumman_ref=%s",
-            BIRTHDAY_TANVIR_REF,
-            BIRTHDAY_RUMMAN_REF,
-        )
-        return
-
-    message_text = _build_birthday_message(tanvir_user_id, rumman_user_id)
-
-    try:
-        if _is_message_already_scheduled(client, BIRTHDAY_CHANNEL, post_at, message_text):
-            logger.info(
-                "Birthday message already scheduled for channel=%s at post_at=%s",
-                BIRTHDAY_CHANNEL,
-                post_at,
-            )
-            return
-
-        response = client.chat_scheduleMessage(
-            channel=BIRTHDAY_CHANNEL,
-            text=message_text,
-            post_at=post_at,
-        )
-        logger.info(
-            "Birthday message scheduled. channel=%s post_at=%s scheduled_message_id=%s",
-            BIRTHDAY_CHANNEL,
-            post_at,
-            response.get("scheduled_message_id"),
-        )
-    except SlackApiError as e:
-        logger.error("Failed to schedule birthday message: %s", e.response.get("error"))
 
 
 def _post_welcome_with_retry(client, channel_id, logger):
@@ -502,18 +359,6 @@ def handle_message_events(body, client, logger):
 # --- Flask server for Slack Events API ---
 flask_app = Flask(__name__)
 handler = SlackRequestHandler(bolt_app)
-_BIRTHDAY_SCHEDULE_ATTEMPTED = False
-
-
-def _ensure_birthday_scheduled():
-    global _BIRTHDAY_SCHEDULE_ATTEMPTED
-    if _BIRTHDAY_SCHEDULE_ATTEMPTED:
-        return
-    _BIRTHDAY_SCHEDULE_ATTEMPTED = True
-    _schedule_birthday_message(bolt_app.client, logging.getLogger(__name__))
-
-
-_ensure_birthday_scheduled()
 
 @flask_app.get("/")
 def health():
