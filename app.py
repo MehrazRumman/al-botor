@@ -9,7 +9,6 @@ from flask import Flask, request
 
 SAVE_FLAG_REGEX = re.compile(r"--save(d)?\b", re.IGNORECASE)
 AREA51_TRIGGER_REGEX = re.compile(r"(^|\s)@?area51(\s|$)", re.IGNORECASE)
-SIGN_OUT_REGEX = re.compile(r"\bsign(?:ing)?\s*-?\s*out\b", re.IGNORECASE)
 CANVAS_ID_REGEX = re.compile(r"^F[A-Z0-9]{8,}$")
 SLACK_USER_ID_REGEX = re.compile(r"^[UW][A-Z0-9]+$")
 WELCOME_TEXT = "Bhai apnader jonne kaz korte chole ashlam"
@@ -280,19 +279,6 @@ def handle_message_events(body, client, logger):
 
     # ignore bot-generated messages to avoid loops
     if subtype == "bot_message":
-        return
-
-    if channel_id and SIGN_OUT_REGEX.search(text):
-        mention = f"<@{user_id}>" if user_id else ""
-        honorific = "apu" if user_id == "Ishmoth Ura Nuri" else "bhai"
-        greeting_target = f"{mention} {honorific}".strip()
-        try:
-            client.chat_postMessage(
-                channel=channel_id,
-                text=f"{greeting_target} ajke onk kosto korsen, Eibar rest koren :wave: :zzz:",
-            )
-        except SlackApiError as e:
-            logger.warning("Failed to send sign-out response: %s", e.response.get("error"))
         return
 
     if channel_id and AREA51_TRIGGER_REGEX.search(text):
