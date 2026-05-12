@@ -9,6 +9,7 @@ from flask import Flask, request
 
 SAVE_FLAG_REGEX = re.compile(r"--save(d)?\b", re.IGNORECASE)
 AREA51_TRIGGER_REGEX = re.compile(r"(^|\s)@?area51(\s|$)", re.IGNORECASE)
+CATCHUP_TRIGGER_REGEX = re.compile(r"(^|\s)@?catchup(\s|$)", re.IGNORECASE)
 CANVAS_ID_REGEX = re.compile(r"^F[A-Z0-9]{8,}$")
 SLACK_USER_ID_REGEX = re.compile(r"^[UW][A-Z0-9]+$")
 WELCOME_TEXT = "Bhai apnader jonne kaz korte chole ashlam"
@@ -20,6 +21,16 @@ AREA51_MEMBER_IDS = [
 ]
 AREA51_MESSAGE_TEXT = "\n Anik bhai sobaire meeting e dakse, Sobai ashen !! :rocket: \n Eta apnader meeting link:https://meet.google.com/eea-ubxh-qfi . \n Join koren, Ami ektu chill kori :sunglasses: "
 AREA51_USER_ID_CACHE = {}
+
+CATCHUP_MEMBER_IDS = [
+    "Rumman",
+    "Anik",
+    "Intishar Ishmam",
+    "Joy Adhikary",
+    "Ishmoth Ura Nuri",
+]
+CATCHUP_MESSAGE_TEXT = "Assalamulaikum :wave: Mushfiq bhai er pokkho theke janacchi — sobai free thakle 3-5 min por ektu catchup korte chacchen mushfiq bhai. Ei linke join den: https://meet.google.com/kkh-sxvp-xwy :rocket:"
+CATCHUP_USER_ID_CACHE = {}
 
 logging.basicConfig(
     level=logging.INFO,
@@ -148,6 +159,38 @@ def _build_workspace_user_index(client, logger):
         return {}
 
     return user_index
+
+
+def _resolve_catchup_member_ids(client, logger):
+    unresolved_keys = []
+    resolved_user_ids = []
+
+    for member_ref in CATCHUP_MEMBER_IDS:
+        normalized_ref = _normalize_user_key(member_ref)
+        if not normalized_ref:
+            continue
+
+        if SLACK_USER_ID_REGEX.match(member_ref):
+            resolved_user_ids.append(member_ref)
+            continue
+
+        cached_user_id = CATCHUP_USER_ID_CACHE.get(normalized_ref)
+        if cached_user_id:
+            resolved_user_ids.append(cached_user_id)
+        else:
+            unresolved_keys.append(normalized_ref)
+
+    if unresolved_keys:
+        user_index = _build_workspace_user_index(client, logger)
+        for unresolved_key in unresolved_keys:
+            resolved_user_id = user_index.get(unresolved_key)
+            if resolved_user_id:
+                CATCHUP_USER_ID_CACHE[unresolved_key] = resolved_user_id
+                resolved_user_ids.append(resolved_user_id)
+            else:
+                logger.warning("Could not resolve CATCHUP member: %s", unresolved_key)
+
+    return list(dict.fromkeys(resolved_user_ids))
 
 
 def _resolve_area51_member_ids(client, logger):
@@ -292,6 +335,19 @@ def handle_message_events(body, client, logger):
             client.chat_postMessage(channel=channel_id, text=message)
         except SlackApiError as e:
             logger.warning("Failed to send @area51 meeting alert: %s", e.response.get("error"))
+        return
+
+    if channel_id and CATCHUP_TRIGGER_REGEX.search(text):
+        try:
+            member_ids = _resolve_catchup_member_ids(client, logger)
+            if not member_ids:
+                logger.warning("No valid CATCHUP members found for mention.")
+                return
+            mentions = _build_mentions(member_ids)
+            message = f"{mentions} {CATCHUP_MESSAGE_TEXT}".strip()
+            client.chat_postMessage(channel=channel_id, text=message)
+        except SlackApiError as e:
+            logger.warning("Failed to send @catchup alert: %s", e.response.get("error"))
         return
 
     if not channel_id or not SAVE_FLAG_REGEX.search(text):
