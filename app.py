@@ -29,7 +29,7 @@ CATCHUP_MEMBER_IDS = [
     "Joy Adhikary",
     "Ishmoth Ura Nuri",
 ]
-CATCHUP_MESSAGE_TEXT = "Assalamulaikum :wave: Mushfiq bhai er pokkho theke janacchi — sobai free thakle 3-5 min por ektu catchup korte chacchen mushfiq bhai. Ei linke join den: https://meet.google.com/kkh-sxvp-xwy :rocket:"
+CATCHUP_MESSAGE_TEXT = "আসসালামু আলাইকুম , মুশফিক ভাইয়ের পক্ষ থেকে জানানো যাচ্ছে — সবাই ফ্রি থাকলে ভালো হয়, আর ৩–৫ মিনিট পর উনি একটু catch-up করতে চান। লিংকে join দেন https://meet.google.com/kkh-sxvp-xwy :rocket:"
 CATCHUP_USER_ID_CACHE = {}
 
 logging.basicConfig(
