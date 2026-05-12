@@ -180,17 +180,17 @@ def _resolve_catchup_member_ids(client, logger):
         else:
             unresolved_keys.append(normalized_ref)
 
-    if unresolved_keys:
-        user_index = _build_workspace_user_index(client, logger)
-        for unresolved_key in unresolved_keys:
-            resolved_user_id = user_index.get(unresolved_key)
-            if resolved_user_id:
-                CATCHUP_USER_ID_CACHE[unresolved_key] = resolved_user_id
-                resolved_user_ids.append(resolved_user_id)
-            else:
-                logger.warning("Could not resolve CATCHUP member: %s", unresolved_key)
+    # if unresolved_keys:
+    #     user_index = _build_workspace_user_index(client, logger)
+    #     for unresolved_key in unresolved_keys:
+    #         resolved_user_id = user_index.get(unresolved_key)
+    #         if resolved_user_id:
+    #             CATCHUP_USER_ID_CACHE[unresolved_key] = resolved_user_id
+    #             resolved_user_ids.append(resolved_user_id)
+    #         else:
+    #             logger.warning("Could not resolve CATCHUP member: %s", unresolved_key)
 
-    return list(dict.fromkeys(resolved_user_ids))
+    # return list(dict.fromkeys(resolved_user_ids))
 
 
 def _resolve_area51_member_ids(client, logger):
